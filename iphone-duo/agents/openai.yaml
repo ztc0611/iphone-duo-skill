@@ -1,0 +1,4 @@
+interface:
+  display_name: "iPhone Duo"
+  short_description: "Build adaptive Duo layouts and test the simulator"
+  default_prompt: "Use $iphone-duo to adapt an app layout and check it in the iPhone Duo simulator."
