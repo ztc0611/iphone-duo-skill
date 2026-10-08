@@ -42,6 +42,18 @@ Apple's beta references differ on whether inactive regions are returned by defau
 
 For articles, feeds, and lists, preserve continuous scrolling instead of shifting the entire scrolling surface away from the fold. [Apple: Strike a pose](https://developer.apple.com/videos/play/tech-talks/111463/)
 
+## Split views across fold states
+
+On the inner display with side-by-side split columns, the system adjusts their widths around an active fold to keep both visible in an even split; when flat, the columns return to their normal widths. Expect detail content to reflow as the column width changes. This column resize is compatible with keeping the scrolling surface continuous. [Apple: Strike a pose](https://developer.apple.com/videos/play/tech-talks/111463/)
+
+Let the split detail's own safe area and margins govern its content. Rebuilding margins from a window-wide trailing inset and the animated column width can move content out of sync with the system's column transition.
+
+## Picture in Picture
+
+On Duo, a user can pin video above the current app, reducing that app's available height. A partial fold can expand the video to half the display. Lay out the app below PiP from its current window scene geometry, safe areas, and size classes; keep controls usable and preserve selection and logical scroll position as the space changes. Test this with another app's PiP even if the app has no video of its own. [Apple: Design for iPhone Duo](https://developer.apple.com/videos/play/tech-talks/111466/) · [Apple: multiple displays and scenes](https://developer.apple.com/videos/play/tech-talks/111464/)
+
+For an app that plays video, use [AVKit's Picture in Picture support](https://developer.apple.com/documentation/avkit/adopting-picture-in-picture-in-a-custom-player) for the player. Let the system's PiP controls handle pin placement; do not assume the app can set it programmatically. For a focused simulator workflow, read [Picture in Picture testing](picture-in-picture.md).
+
 ## Custom layout checks
 
 Implementation checks, not Apple API guarantees or a reason to replace `ArrangementView`:
