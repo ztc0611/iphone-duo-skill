@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Drive an iPhone Duo simulator's displays from the command line.
+
+    duo <udid> displays
+    duo <udid> tap <inner|cover> <x> <y>                  points, as the display shows now
+    duo <udid> drag <inner|cover> <x1> <y1> <x2> <y2> [seconds]
+    duo <udid> orient <wide|upright|portrait|pud|landscape-left|landscape-right>
+    duo <udid> hinge <degrees>                            0 closed, 180 flat
+    duo <udid> shot <inner|cover> <out.png>
+
+Touches go through the guest's dtuhidd digitizer (`duohid`, beside this
+script), which takes unit coordinates of each panel's unrotated framebuffer;
+this script reads the display's size and current UI orientation from
+`simctl io enumerate` and converts points shown on screen into that frame.
+Only the lit display takes touches: inner while open, cover while closed.
+"""
+import os
+import re
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DUOHID = os.path.join(HERE, "duohid")
+SOURCE = os.path.join(HERE, "duohid.m")
+BUILD = os.path.join(HERE, "build-duo.sh")
+SCALE = 3
+DEVICE_NAMES = {"cover": "primary", "inner": "primary-1"}
+# The Duo's inner display: "wide" is the book held open, "upright" stands it
+# portrait. Device orientation names refer to the folded phone's body.
+ORIENTATIONS = {"wide": "portrait", "upright": "landscape-left"}
+
+
+def configure_developer_dir():
+    developer_dir = os.environ.get("DEVELOPER_DIR")
+    if not developer_dir:
+        developer_dir = subprocess.check_output(["xcode-select", "-p"], text=True, timeout=10).strip()
+    if developer_dir.endswith(".app"):
+        developer_dir = os.path.join(developer_dir, "Contents", "Developer")
+    os.environ["DEVELOPER_DIR"] = developer_dir
+
+
+def ensure_duohid():
+    if (not os.path.isfile(DUOHID) or not os.access(DUOHID, os.X_OK)
+            or os.stat(DUOHID).st_mtime_ns < os.stat(SOURCE).st_mtime_ns):
+        subprocess.run([BUILD], check=True, timeout=30)
+
+
+def screens(udid):
+    out = subprocess.run(["xcrun", "simctl", "io", udid, "enumerate"],
+                         check=True, capture_output=True, text=True, timeout=30).stdout
+    found = {}
+    for block in re.split(r"\n\s*\(\d+\) ", out):
+        name = re.search(r"Device Name: (\S+)", block)
+        if not name:
+            continue
+        found[name.group(1)] = {
+            "uuid": re.search(r"Unique ID: (\S+)", block).group(1),
+            "pixels": tuple(int(v) for v in re.search(r"Pixel Size: \{(\d+), (\d+)\}", block).groups()),
+            "orientation": re.search(r"UI Orientation: (.+)", block).group(1).strip(),
+        }
+    return found
+
+
+def targets(udid):
+    out = subprocess.run([DUOHID, udid, "displays"],
+                         check=True, capture_output=True, text=True, timeout=30).stdout
+    return {m.group(2): int(m.group(1)) for m in re.finditer(r"target (\d+)\s+display (\S+)", out)}
+
+
+def resolve(udid, display):
+    screen = screens(udid)[DEVICE_NAMES[display]]
+    target = targets(udid).get(screen["uuid"])
+    if target is None:
+        sys.exit(f"no touchscreen for the {display} display")
+    return screen, target
+
+
+def unit(screen, x, y):
+    """A point as the display shows it now, to the unrotated panel's 0...1."""
+    width, height = screen["pixels"][0] / SCALE, screen["pixels"][1] / SCALE
+    rotation = screen["orientation"]
+    if rotation == "Landscape Left":          # rot90
+        nx, ny = y, height - x
+    elif rotation == "Portrait Upside Down":  # rot180
+        nx, ny = width - x, height - y
+    elif rotation == "Landscape Right":       # rot270
+        nx, ny = width - y, x
+    else:                                     # Portrait, rot0
+        nx, ny = x, y
+    return nx / width, ny / height
+
+
+def main(argv):
+    if len(argv) < 3:
+        sys.exit(__doc__)
+    udid, command, args = argv[1], argv[2], argv[3:]
+    configure_developer_dir()
+    if command in {"displays", "tap", "drag", "orient", "hinge"}:
+        ensure_duohid()
+    if command == "displays":
+        for name, screen in screens(udid).items():
+            if name in DEVICE_NAMES.values():
+                print(name, screen)
+        subprocess.run([DUOHID, udid, "displays"], check=True, timeout=30)
+    elif command == "tap":
+        screen, target = resolve(udid, args[0])
+        x, y = unit(screen, float(args[1]), float(args[2]))
+        subprocess.run([DUOHID, udid, "tap", str(target), f"{x:.5f}", f"{y:.5f}"],
+                       check=True, timeout=30)
+    elif command == "drag":
+        screen, target = resolve(udid, args[0])
+        x1, y1 = unit(screen, float(args[1]), float(args[2]))
+        x2, y2 = unit(screen, float(args[3]), float(args[4]))
+        seconds = args[5] if len(args) > 5 else "0.4"
+        subprocess.run([DUOHID, udid, "drag", str(target), f"{x1:.5f}", f"{y1:.5f}",
+                        f"{x2:.5f}", f"{y2:.5f}", seconds], check=True, timeout=30)
+    elif command == "orient":
+        subprocess.run([DUOHID, udid, "orient", ORIENTATIONS.get(args[0], args[0])],
+                       check=True, timeout=30)
+    elif command == "hinge":
+        subprocess.run([DUOHID, udid, "hinge", args[0]], check=True, timeout=30)
+    elif command == "shot":
+        screen = screens(udid)[DEVICE_NAMES[args[0]]]
+        subprocess.run(["xcrun", "simctl", "io", udid, "screenshot", f"--display={screen['uuid']}", args[1]],
+                       check=True, capture_output=True, timeout=30)
+        print(args[1])
+    else:
+        sys.exit(__doc__)
+
+
+def failure_detail(error):
+    detail = error.stderr or ""
+    if isinstance(detail, bytes):
+        detail = detail.decode(errors="replace")
+    return detail.strip()
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv)
+    except subprocess.CalledProcessError as error:
+        tool = os.path.basename(error.cmd[0])
+        detail = failure_detail(error)
+        print(f"{tool} failed (exit {error.returncode})" + (f": {detail}" if detail else ""), file=sys.stderr)
+        sys.exit(1)
+    except subprocess.TimeoutExpired as error:
+        tool = os.path.basename(error.cmd[0])
+        detail = failure_detail(error)
+        print(f"{tool} timed out after {error.timeout}s" + (f": {detail}" if detail else ""), file=sys.stderr)
+        sys.exit(1)

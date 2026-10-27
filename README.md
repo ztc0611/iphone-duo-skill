@@ -4,7 +4,7 @@ A portable skill for building adaptive iPhone Duo app layouts and testing fold b
 
 ## Install
 
-Copy the entire `iphone-duo` directory, including `SKILL.md` and `references/`, into your agent's supported skills directory. If you already have a customized `iphone-duo` skill, preserve it and review the new files before replacing anything.
+Copy the entire `iphone-duo` directory, including `SKILL.md`, `references/`, and `scripts/`, into your agent's supported skills directory. If you already have a customized `iphone-duo` skill, preserve it and review the new files before replacing anything. The bundled `scripts/duo` simulator helper builds and caches its native backend on first use with Xcode command-line tools.
 
 For Codex, the default personal location is `~/.codex/skills/iphone-duo`. Invoke it with `$iphone-duo`, or let skill discovery select it for relevant requests.
 
